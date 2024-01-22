@@ -27,15 +27,20 @@ ratingDict = {
     3: "explicit"
 }
 
-def process_chunk(chunk):
+def process_chunk(job_data):
+    chunk, job_id = job_data
+    if os.path.exists(f'database_graph_{job_id}.rdf'):
+        return f'database_graph_{job_id}.rdf'
     local_graph = Graph()  # Create a local graph for each chunk
     # Your existing code for `add_post` and other functions
     local_graph.parse('boorudatabase.rdf')
     # Process each row in the chunk
     for _, row in chunk.iterrows():
         add_post(row, local_graph)  # Pass the local graph to add_post
-
-    return local_graph.serialize(format='xml')  # Return the serialized graph
+    # write to file
+    with open(f'database_graph_{job_id}.rdf', 'w', encoding='utf-8') as f:
+        f.write(local_graph.serialize(format='xml'))
+    return f'database_graph_{job_id}.rdf'
 
 def add_post(csv_row, data_graph, database_id=0):
     postid = csv_row['id']
@@ -147,22 +152,30 @@ def main(limit=1000000, multiprocess=True):
             f.write(combined_graph.serialize(format='xml'))
         return
     # Assuming 'df' is your DataFrame
-    num_processes = 12  # Number of processes to create
+    num_processes = 24  # Number of processes to create
     chunk_split_size = 10000
     # Split DataFrame into chunks
     chunks = np.array_split(df, df.shape[0] // chunk_split_size)
-
+    chunk_with_id = [(chunk, i) for i, chunk in enumerate(chunks)]
     # Create a pool of processes
-    results = process_map(process_chunk, chunks, max_workers=num_processes)
+    results = process_map(process_chunk, chunk_with_id, max_workers=num_processes)
 
     # Combine results
     combined_graph = Graph()
-    for result in results:
-        combined_graph.parse(data=result, format='xml')
+    for result in tqdm(results):
+        # read from file
+        local_graph = Graph()
+        local_graph.parse(result)
+        # combine
+        combined_graph += local_graph
 
     # Serialize the combined graph
     with open('database_graph.rdf', 'w', encoding='utf-8') as f:
         f.write(combined_graph.serialize(format='xml'))
+    
+    # Finally, remove the temporary files
+    for result in results:
+        os.remove(result)
 
 if __name__ == '__main__':
     def dump_tag_names():
