@@ -2,7 +2,7 @@ from multiprocessing import Pool
 import os
 
 import numpy as np
-from db import *
+import json
 
 import pandas as pd
 
@@ -10,6 +10,10 @@ from rdflib import Graph, Namespace, Literal, RDF, RDFS, OWL, BNode, URIRef
 from rdflib.namespace import XSD
 from tqdm import tqdm
 from tqdm.contrib.concurrent import process_map 
+
+if os.path.exists('tag_id_to_name.json'):
+    with open('tag_id_to_name.json') as f:
+        tag_id_to_name = json.load(f)
 
 ns = "http://www.semanticweb.org/scarlet/ontologies/2024/0/DatabaseOntology#"
 
@@ -106,7 +110,7 @@ def add_post(csv_row, data_graph, database_id=0):
             return
         for tag in tag_list.split():
             # get tag object
-            tag_name = Tag.get_by_id(tag).name
+            tag_name = tag_id_to_name.get(str(tag))
             if not tag_name:
                 continue
             # search in graph for tag
@@ -130,6 +134,7 @@ def main(limit=1000000, multiprocess=True):
         df = pd.read_csv('dataset.csv', nrows=limit)
     else:
         df = pd.read_csv('dataset.csv')
+    print("Loaded dataset")
     # Load the ontology
     ontology_graph = Graph()
     ontology_graph.parse('boorudatabase.rdf')
@@ -142,10 +147,10 @@ def main(limit=1000000, multiprocess=True):
             f.write(combined_graph.serialize(format='xml'))
         return
     # Assuming 'df' is your DataFrame
-    num_processes = os.cpu_count()  # Number of processes to create
-
+    num_processes = 12  # Number of processes to create
+    chunk_split_size = 10000
     # Split DataFrame into chunks
-    chunks = np.array_split(df, num_processes)
+    chunks = np.array_split(df, df.shape[0] // chunk_split_size)
 
     # Create a pool of processes
     results = process_map(process_chunk, chunks, max_workers=num_processes)
@@ -160,4 +165,14 @@ def main(limit=1000000, multiprocess=True):
         f.write(combined_graph.serialize(format='xml'))
 
 if __name__ == '__main__':
-    main(1000)
+    def dump_tag_names():
+        from db import Tag
+        tag_id_to_name = {}
+        for tag in Tag.select():
+            tag_id_to_name[tag.id] = tag.name
+        with open('tag_id_to_name.json', 'w') as f:
+            json.dump(tag_id_to_name, f)
+
+    if not os.path.exists('tag_id_to_name.json'):
+        dump_tag_names()
+    main(limit=None, multiprocess=True)
